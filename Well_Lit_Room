@@ -1,0 +1,128 @@
+/**
+ *  Turn on if Dark
+ *
+ *  Copyright 2014 Emily Shuey
+ *
+ *  Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except
+ *  in compliance with the License. You may obtain a copy of the License at:
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software distributed under the License is distributed
+ *  on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License
+ *  for the specific language governing permissions and limitations under the License.
+ *
+ */
+definition(
+    name: "Well_Lit_Room",
+    namespace: "geekychick85",
+    author: "Emily Shuey",
+    description: "Turn on lights when motion is sensed and it's dark. Turns them off when motion stops or it gets light",
+    category: "My Apps",
+    iconUrl: "https://s3.amazonaws.com/smartapp-icons/Categories/lightsAndSwitches.png",
+    iconX2Url: "https://s3.amazonaws.com/smartapp-icons/Categories/lightsAndSwitches@2x.png",
+    iconX3Url: "https://s3.amazonaws.com/smartapp-icons/Categories/lightsAndSwitches@2x.png")
+
+
+preferences {
+	section("Control these lights..."){
+		input "lights", "capability.switch", multiple: true
+        input(name: "lightsLevel", type: "number", title: "Set Dimmer Levels To", description: null, multiple: false, range: "(0..99)")
+	}
+	section("Turning on when it's dark and there's movement..."){
+		input "motionSensor", "capability.motionSensor", title: "Where?"
+	}
+	section("And then off when it's light or there's been no movement for..."){
+		input "delayMinutes", "number", title: "Minutes?"
+	}
+	section("Using this light sensor"){
+		input "lightSensor", "capability.illuminanceMeasurement"
+	}
+    
+    	
+}
+
+def installed() {
+	initialize()
+}
+
+def updated() {
+	state.lastStatus = "off"
+    state.motionStopTime = null
+	unsubscribe()
+	unschedule()
+	initialize()
+}
+
+def initialize() {
+	state.intLowLight = 100
+    state.intHighLight = 200
+	subscribe(motionSensor, "motion", motionHandler)
+    subscribe(lightSensor,"illuminance", brightnessHandler)
+}
+
+def motionHandler(evt) {
+	log.debug "$evt.name: $evt.value"
+	if (evt.value == "active") {
+		if (lightSensor.currentIlluminance < state.intLowLight && lightsAreOff(lights)) {
+			log.debug "turning on lights due to motion"
+			lights.each{
+                if(hasSetLevelCommand(it)){
+                    it.setLevel(lightsLevel)
+                }
+            }
+            lights.on()
+			state.lastStatus = "on"
+		}
+		state.motionStopTime = null
+	}
+	else {
+		state.motionStopTime = now()
+		if(delayMinutes) {
+			runIn(delayMinutes*60, turnOffMotionAfterDelay, [overwrite: false])
+		} else {
+			turnOffMotionAfterDelay()
+		}
+	}
+}
+
+def brightnessHandler(evt) {
+	log.debug("Brightness Changed")
+    if (lightSensor.currentIlluminance > state.intHighLight) {
+    	lights.off()
+        state.lastStatus = "off"
+    }
+}
+
+private lightsAreOff(lightCollection) {
+	def isOff = true
+    lightCollection.each {
+      if(it.currentValue('switch').contains('on')) {
+      	isOff = false
+      }
+    }
+	return isOff
+}
+
+private hasSetLevelCommand(device) {
+	def isDimmer = false
+	device.supportedCommands.each {
+		if (it.name.contains("setLevel")) {
+			isDimmer = true
+		}
+	}
+	return isDimmer
+}
+
+def turnOffMotionAfterDelay() {
+	log.trace "In turnOffMotionAfterDelay, state.motionStopTime = $state.motionStopTime, state.lastStatus = $state.lastStatus"
+	if (state.motionStopTime && state.lastStatus != "off") {
+		def elapsed = now() - state.motionStopTime
+        log.trace "elapsed = $elapsed"
+		if (elapsed >= ((delayMinutes ?: 0) * 60000L) - 2000) {
+        	log.debug "Turning off lights"
+			lights.off()
+			state.lastStatus = "off"
+		}
+	}
+}
