@@ -1,0 +1,126 @@
+
+definition(
+    name: "Awesome Remote",
+    namespace: "geekychick85",
+    author: "Emily Shuey",
+    description: "Sets buttons 1 & 2 to control two different lights.  If dimmable, each press will dim by 20%.  Holding will turn off. Sets button 3 to toggle between day and night mode.  I'll figure out the rest of the buttons later.",
+    category: "My Apps",
+    iconUrl: "https://s3.amazonaws.com/smartapp-icons/MiscHacking/remote.png",
+    iconX2Url: "https://s3.amazonaws.com/smartapp-icons/MiscHacking/remote@2x.png"
+)
+
+preferences {
+
+	page(name: "selectRemote")
+    page(name: "configureButtons")    
+}
+
+def selectRemote(){
+	dynamicPage(name: "selectRemote", title: "First, select your remote", nextPage: "configureButtons") {
+        section("Select a remote"){
+            input "remote", "capability.button", title:"Remote", multiple:true,required:true 
+        }
+    }
+}
+def configureButtons(){
+	dynamicPage(name: "configureButtons", title: "Select Button Options", install: true, uninstall: true) {
+        section("Select switch one"){
+            input "switch1", "capability.switch", title:"Switch 1",multiple:false,required:true
+        }
+        section("Select switch two"){
+            input "switch2", "capability.switch", title:"Switch 2",multiple:false,required:true
+        }
+
+        def phrases = location.helloHome?.getPhrases()*.label
+        if (phrases) {
+            log.trace phrases
+            section("Hello Home Actions - Button 3") {
+                input "phrase_3_pushed", "enum", title: "Pushed", required: false, options: phrases
+            }
+            section("Hello Home Actions - Button 4") {
+                input "phrase_4_pushed", "enum", title: "Pushed", required: false, options: phrases
+            }
+        }
+      }
+
+}
+def installed() {
+	initalize()
+    
+}
+
+def updated(){
+	unsubscribe()
+    initalize()
+}
+
+def initalize(){
+	log.debug (remote)
+    subscribe (remote, "button", buttonEvent)
+}
+
+def buttonEvent(evt){
+	def buttonNumber = evt.data
+    def value = evt.value
+	log.debug "buttonEvent: $evt.name = $evt.value ($evt.data)"
+	log.debug "button: $buttonNumber, value: $value"
+    
+
+    switch(buttonNumber) {
+        case ~/.*1.*/:
+        handleSwitch(switch1, value)
+        break
+            case ~/.*2.*/:
+        handleSwitch(switch2, value)
+        break
+            case ~/.*3.*/:
+        location.helloHome.execute(phrase_3_pushed)
+        break
+            case ~/.*4.*/:
+         location.helloHome.execute(phrase_4_pushed)
+        break
+            }
+
+    
+    
+}
+
+private handleSwitch(device, value){
+	if (value == "held" && isDimmer(device)){
+    	log.debug("$device is dimmable")
+    	handleDimmer(device)
+    } else {
+    	if (device.currentValue('switch').contains('off')){
+        	device.on()
+        } else {
+        	device.off()
+        }
+    }
+    
+    
+}
+
+private handleDimmer(device){
+	if (device.currentValue('switch').contains('off')){
+    	device.setLevel(100)
+        device.on()
+    } else {
+    	if (device.currentValue('level') <= 20){
+        	log.debug("$device turning off")
+            device.off()
+        } else {
+        	log.debug("lowering $device by 20% from $device.currentValue('level')")
+            device.setLevel(device.currentValue('level') - 20)
+        }
+    }
+}
+
+private isDimmer(device) {
+	def hasSetLevelCommand = false
+	device.supportedCommands.each {
+		if (it.name.contains("setLevel")) {
+			hasSetLevelCommand = true
+		}
+	}
+	return hasSetLevelCommand
+}
